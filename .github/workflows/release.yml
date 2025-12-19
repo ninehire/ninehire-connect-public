@@ -1,0 +1,139 @@
+name: Build Production
+
+on:
+  push:
+    tags:
+      - "v*" # v1.0.0 같은 태그 푸시 시
+  workflow_dispatch:
+
+jobs:
+  build-mac:
+    runs-on: macos-latest
+    environment: production
+    steps:
+      - name: Checkout private repo
+        uses: actions/checkout@v4
+        with:
+          repository: ninehire/ninehire-connect
+          ref: main # 프라이빗 레포의 main 브랜치
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          path: source
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Enable Corepack
+        working-directory: source
+        run: corepack enable
+
+      - name: Install dependencies
+        working-directory: source
+        run: yarn install --immutable
+
+      - name: Import Certificate
+        env:
+          MAC_CERTIFICATE_BASE64: ${{ secrets.MAC_CERTIFICATE_BASE64 }}
+          MAC_CERTIFICATE_PASSWORD: ${{ secrets.MAC_CERTIFICATE_PASSWORD }}
+        run: |
+          echo "$MAC_CERTIFICATE_BASE64" | base64 --decode > certificate.p12
+          security create-keychain -p "$MAC_CERTIFICATE_PASSWORD" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "$MAC_CERTIFICATE_PASSWORD" build.keychain
+          security import certificate.p12 -k build.keychain -P "$MAC_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$MAC_CERTIFICATE_PASSWORD" build.keychain
+          rm certificate.p12
+
+      - name: Build & Notarize
+        working-directory: source
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          PROD_URL: ${{ vars.PROD_URL }}
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          GAMEJOB_DOMAIN: ${{ vars.GAMEJOB_DOMAIN }}
+          SARAMIN_DOMAIN: ${{ vars.SARAMIN_DOMAIN }}
+          SARAMIN_OLD_DOMAIN: ${{ vars.SARAMIN_OLD_DOMAIN }}
+          SARAMIN_API_DOMAIN: ${{ vars.SARAMIN_API_DOMAIN }}
+          WANTED_DOMAIN: ${{ vars.WANTED_DOMAIN }}
+          WANTED_INTEGRATION_DOMAIN: ${{ vars.WANTED_INTEGRATION_DOMAIN }}
+          JOB_KOREA_DOMAIN: ${{ vars.JOB_KOREA_DOMAIN }}
+          ALBAMON_DOMAIN: ${{ vars.ALBAMON_DOMAIN }}
+          ALBAMON_BFF_COMPANY: ${{ vars.ALBAMON_BFF_COMPANY }}
+          SENTRY_ENVIRONMENT: production
+          GITHUB_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
+        run: yarn dist:mac
+
+      - name: Copy artifacts
+        run: |
+          mkdir -p artifacts
+          cp source/apps/desktop/release/*.dmg artifacts/ 2>/dev/null || echo "No DMG files found"
+          cp source/apps/desktop/release/*.zip artifacts/ 2>/dev/null || echo "No ZIP files found"
+
+      - name: Clean source code
+        run: rm -rf source
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac-release
+          path: artifacts/*
+          retention-days: 30
+
+  build-windows:
+    runs-on: windows-latest
+    environment: production
+    steps:
+      - name: Checkout private repo
+        uses: actions/checkout@v4
+        with:
+          repository: ninehire/ninehire-connect
+          ref: main
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          path: source
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Enable Corepack
+        working-directory: source
+        run: corepack enable
+
+      - name: Install dependencies
+        working-directory: source
+        run: yarn install --immutable
+
+      - name: Build
+        working-directory: source
+        env:
+          PROD_URL: ${{ vars.PROD_URL }}
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          GAMEJOB_DOMAIN: ${{ vars.GAMEJOB_DOMAIN }}
+          SARAMIN_DOMAIN: ${{ vars.SARAMIN_DOMAIN }}
+          SARAMIN_OLD_DOMAIN: ${{ vars.SARAMIN_OLD_DOMAIN }}
+          SARAMIN_API_DOMAIN: ${{ vars.SARAMIN_API_DOMAIN }}
+          WANTED_DOMAIN: ${{ vars.WANTED_DOMAIN }}
+          WANTED_INTEGRATION_DOMAIN: ${{ vars.WANTED_INTEGRATION_DOMAIN }}
+          JOB_KOREA_DOMAIN: ${{ vars.JOB_KOREA_DOMAIN }}
+          ALBAMON_DOMAIN: ${{ vars.ALBAMON_DOMAIN }}
+          ALBAMON_BFF_COMPANY: ${{ vars.ALBAMON_BFF_COMPANY }}
+          SENTRY_ENVIRONMENT: production
+          GITHUB_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
+        run: yarn dist:win
+
+      - name: Copy artifacts
+        run: |
+          mkdir artifacts
+          copy source\apps\desktop\release\*.exe artifacts\ 2>nul || echo No EXE files found
+        shell: cmd
+
+      - name: Clean source code
+        run: Remove-Item -Recurse -Force source
+        shell: powershell
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-release
+          path: artifacts/*.exe
+          retention-days: 30
