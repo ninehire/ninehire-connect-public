@@ -1,9 +1,6 @@
 name: Build Dev
 
 on:
-  push:
-    branches:
-      - main # 퍼블릭 레포의 기본 브랜치
   workflow_dispatch:
 
 jobs:

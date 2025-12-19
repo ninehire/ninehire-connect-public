@@ -6,7 +6,8 @@ on:
 jobs:
   build-mac:
     runs-on: macos-latest
-    environment: production
+    # environment: production
+    environment: development
     outputs:
       version: ${{ steps.get_version.outputs.version }}
     steps:
@@ -90,7 +91,8 @@ jobs:
 
   build-windows:
     runs-on: windows-latest
-    environment: production
+    # environment: production
+    environment: development
     steps:
       - name: Checkout private repo
         uses: actions/checkout@v4
