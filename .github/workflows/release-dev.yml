@@ -61,6 +61,7 @@ jobs:
           JOB_KOREA_DOMAIN: ${{ vars.JOB_KOREA_DOMAIN }}
           ALBAMON_DOMAIN: ${{ vars.ALBAMON_DOMAIN }}
           ALBAMON_BFF_COMPANY: ${{ vars.ALBAMON_BFF_COMPANY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # 퍼블릭 레포 자동 제공
           SENTRY_ENVIRONMENT: development
         run: yarn dist:mac:dev
 
@@ -117,6 +118,7 @@ jobs:
           ALBAMON_DOMAIN: ${{ vars.ALBAMON_DOMAIN }}
           ALBAMON_BFF_COMPANY: ${{ vars.ALBAMON_BFF_COMPANY }}
           SENTRY_ENVIRONMENT: development
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # 퍼블릭 레포 자동 제공
         run: yarn dist:win:dev
 
       - name: Copy artifacts
