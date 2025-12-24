@@ -195,7 +195,7 @@ jobs:
             ---
 
             **버전:** ${{ needs.build-mac.outputs.version }}  
-            **빌드 날짜:** ${{ github.event.repository.updated_at }}
+            **빌드 날짜:** ${{ steps.time.outputs.kst }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
