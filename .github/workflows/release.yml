@@ -71,6 +71,7 @@ jobs:
           ALBAMON_DOMAIN: ${{ vars.ALBAMON_DOMAIN }}
           ALBAMON_BFF_COMPANY: ${{ vars.ALBAMON_BFF_COMPANY }}
           SENTRY_ENVIRONMENT: production
+          CRAWLING_ENCRYPTION_KEY: ${{ secrets.CRAWLING_ENCRYPTION_KEY }}
         run: yarn dist:mac:local
 
       - name: Copy artifacts
@@ -130,6 +131,7 @@ jobs:
           ALBAMON_DOMAIN: ${{ vars.ALBAMON_DOMAIN }}
           ALBAMON_BFF_COMPANY: ${{ vars.ALBAMON_BFF_COMPANY }}
           SENTRY_ENVIRONMENT: production
+          CRAWLING_ENCRYPTION_KEY: ${{ secrets.CRAWLING_ENCRYPTION_KEY }}
         run: yarn dist:win:local
 
       - name: Copy artifacts

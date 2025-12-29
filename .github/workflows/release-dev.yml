@@ -60,6 +60,7 @@ jobs:
           ALBAMON_BFF_COMPANY: ${{ vars.ALBAMON_BFF_COMPANY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # 퍼블릭 레포 자동 제공
           SENTRY_ENVIRONMENT: development
+          CRAWLING_ENCRYPTION_KEY: ${{ secrets.CRAWLING_ENCRYPTION_KEY }}
         run: yarn dist:mac:dev
 
       - name: Copy artifacts
@@ -116,6 +117,7 @@ jobs:
           ALBAMON_BFF_COMPANY: ${{ vars.ALBAMON_BFF_COMPANY }}
           SENTRY_ENVIRONMENT: development
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # 퍼블릭 레포 자동 제공
+          CRAWLING_ENCRYPTION_KEY: ${{ secrets.CRAWLING_ENCRYPTION_KEY }}
         run: yarn dist:win:dev
 
       - name: Copy artifacts
