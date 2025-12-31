@@ -1,4 +1,4 @@
-name: Build Production
+name: Build Dev (PRD Env)
 
 on:
   workflow_dispatch:
@@ -7,24 +7,14 @@ jobs:
   build-mac:
     runs-on: macos-latest
     environment: production
-    outputs:
-      version: ${{ steps.get_version.outputs.version }}
     steps:
       - name: Checkout private repo
         uses: actions/checkout@v4
         with:
           repository: ninehire/ninehire-connect
-          ref: main
+          ref: dev # 프라이빗 레포의 dev 브랜치
           token: ${{ secrets.PRIVATE_REPO_TOKEN }}
           path: source
-
-      - name: Get version from package.json
-        id: get_version
-        working-directory: source
-        run: |
-          VERSION=$(node -p "require('./apps/desktop/package.json').version")
-          echo "version=v$VERSION" >> $GITHUB_OUTPUT
-          echo "📦 Version: v$VERSION"
 
       - uses: actions/setup-node@v4
         with:
@@ -57,7 +47,7 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          PROD_URL: ${{ vars.PROD_URL }}
+          PROD_URL: ${{ vars.DEV_URL }}
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
           GAMEJOB_DOMAIN: ${{ vars.GAMEJOB_DOMAIN }}
           SARAMIN_DOMAIN: ${{ vars.SARAMIN_DOMAIN }}
@@ -68,25 +58,24 @@ jobs:
           JOB_KOREA_DOMAIN: ${{ vars.JOB_KOREA_DOMAIN }}
           ALBAMON_DOMAIN: ${{ vars.ALBAMON_DOMAIN }}
           ALBAMON_BFF_COMPANY: ${{ vars.ALBAMON_BFF_COMPANY }}
-          SENTRY_ENVIRONMENT: production
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # 퍼블릭 레포 자동 제공
+          SENTRY_ENVIRONMENT: development
           CRAWLING_ENCRYPTION_KEY: ${{ secrets.CRAWLING_ENCRYPTION_KEY }}
-        run: yarn dist:mac:local
+        run: yarn dist:mac:dev
 
       - name: Copy artifacts
         run: |
           mkdir -p artifacts
           cp source/apps/desktop/release/*.dmg artifacts/ 2>/dev/null || echo "No DMG files found"
-          cp source/apps/desktop/release/*.zip artifacts/ 2>/dev/null || echo "No ZIP files found"
-          cp source/apps/desktop/release/latest-mac.yml artifacts/ 2>/dev/null || echo "No latest-mac.yml found"
 
       - name: Clean source code
         run: rm -rf source
 
       - uses: actions/upload-artifact@v4
         with:
-          name: mac-release
-          path: artifacts/*
-          retention-days: 30
+          name: mac-dmg-dev-prd-env
+          path: artifacts/*.dmg
+          retention-days: 7
 
   build-windows:
     runs-on: windows-latest
@@ -96,7 +85,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: ninehire/ninehire-connect
-          ref: main
+          ref: dev
           token: ${{ secrets.PRIVATE_REPO_TOKEN }}
           path: source
 
@@ -115,7 +104,7 @@ jobs:
       - name: Build
         working-directory: source
         env:
-          PROD_URL: ${{ vars.PROD_URL }}
+          PROD_URL: ${{ vars.DEV_URL }}
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
           GAMEJOB_DOMAIN: ${{ vars.GAMEJOB_DOMAIN }}
           SARAMIN_DOMAIN: ${{ vars.SARAMIN_DOMAIN }}
@@ -126,15 +115,15 @@ jobs:
           JOB_KOREA_DOMAIN: ${{ vars.JOB_KOREA_DOMAIN }}
           ALBAMON_DOMAIN: ${{ vars.ALBAMON_DOMAIN }}
           ALBAMON_BFF_COMPANY: ${{ vars.ALBAMON_BFF_COMPANY }}
-          SENTRY_ENVIRONMENT: production
+          SENTRY_ENVIRONMENT: development
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # 퍼블릭 레포 자동 제공
           CRAWLING_ENCRYPTION_KEY: ${{ secrets.CRAWLING_ENCRYPTION_KEY }}
-        run: yarn dist:win:local
+        run: yarn dist:win:dev
 
       - name: Copy artifacts
         run: |
           mkdir artifacts
           copy source\apps\desktop\release\*.exe artifacts\ 2>nul || echo No EXE files found
-          copy source\apps\desktop\release\latest.yml artifacts\ 2>nul || echo No latest.yml found
         shell: cmd
 
       - name: Clean source code
@@ -143,61 +132,6 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: windows-release
-          path: artifacts/*
-          retention-days: 30
-
-  create-draft-release:
-    needs: [build-mac, build-windows]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Download Mac artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: mac-release
-          path: release-files
-
-      - name: Download Windows artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: windows-release
-          path: release-files
-
-      - name: Create Draft Release
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: ${{ needs.build-mac.outputs.version }}
-          name: Release ${{ needs.build-mac.outputs.version }}
-          draft: true
-          prerelease: false
-          files: release-files/*
-          body: |
-            ## 🎉 변경사항
-            <!-- 여기에 릴리즈 노트를 작성해주세요 -->
-
-            ## 📦 다운로드
-            - **macOS (Apple Silicon)**: `NinehireConnect-*-arm64.dmg`
-            - **Windows (64-bit)**: `NinehireConnect-*-x64.exe`
-
-            ## 📝 설치 방법
-
-            ### macOS
-            1. DMG 파일 다운로드
-            2. DMG 파일 실행
-            3. NinehireConnect 앱을 Applications 폴더로 드래그
-
-            ### Windows
-            1. EXE 파일 다운로드
-            2. 실행하여 설치 마법사 진행
-
-            ---
-
-            **버전:** ${{ needs.build-mac.outputs.version }}  
-            **빌드 날짜:** ${{ steps.time.outputs.kst }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Summary
-        run: |
-          echo "✅ Draft Release Created: ${{ needs.build-mac.outputs.version }}"
-          echo "📝 Please review and publish the release manually"
+          name: windows-exe-dev-prd-env
+          path: artifacts/*.exe
+          retention-days: 7
