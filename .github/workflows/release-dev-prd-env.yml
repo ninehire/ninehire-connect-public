@@ -61,7 +61,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # 퍼블릭 레포 자동 제공
           SENTRY_ENVIRONMENT: development
           CRAWLING_ENCRYPTION_KEY: ${{ secrets.CRAWLING_ENCRYPTION_KEY }}
-        run: yarn dist:mac:dev
+        run: DEBUG=electron-builder yarn dist:mac:dev
 
       - name: Copy artifacts
         run: |
