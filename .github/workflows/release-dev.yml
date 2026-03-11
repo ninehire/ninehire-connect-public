@@ -58,6 +58,7 @@ jobs:
           JOB_KOREA_DOMAIN: ${{ vars.JOB_KOREA_DOMAIN }}
           ALBAMON_DOMAIN: ${{ vars.ALBAMON_DOMAIN }}
           ALBAMON_BFF_COMPANY: ${{ vars.ALBAMON_BFF_COMPANY }}
+          ALBAMON_BFF_COMPANY_V1: ${{ vars.ALBAMON_BFF_COMPANY_V1 }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # 퍼블릭 레포 자동 제공
           SENTRY_ENVIRONMENT: development
           CRAWLING_ENCRYPTION_KEY: ${{ secrets.CRAWLING_ENCRYPTION_KEY }}
@@ -115,6 +116,7 @@ jobs:
           JOB_KOREA_DOMAIN: ${{ vars.JOB_KOREA_DOMAIN }}
           ALBAMON_DOMAIN: ${{ vars.ALBAMON_DOMAIN }}
           ALBAMON_BFF_COMPANY: ${{ vars.ALBAMON_BFF_COMPANY }}
+          ALBAMON_BFF_COMPANY_V1: ${{ vars.ALBAMON_BFF_COMPANY_V1 }}
           SENTRY_ENVIRONMENT: development
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # 퍼블릭 레포 자동 제공
           CRAWLING_ENCRYPTION_KEY: ${{ secrets.CRAWLING_ENCRYPTION_KEY }}

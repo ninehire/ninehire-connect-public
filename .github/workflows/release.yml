@@ -68,6 +68,7 @@ jobs:
           JOB_KOREA_DOMAIN: ${{ vars.JOB_KOREA_DOMAIN }}
           ALBAMON_DOMAIN: ${{ vars.ALBAMON_DOMAIN }}
           ALBAMON_BFF_COMPANY: ${{ vars.ALBAMON_BFF_COMPANY }}
+          ALBAMON_BFF_COMPANY_V1: ${{ vars.ALBAMON_BFF_COMPANY_V1 }}
           SENTRY_ENVIRONMENT: production
           CRAWLING_ENCRYPTION_KEY: ${{ secrets.CRAWLING_ENCRYPTION_KEY }}
         run: yarn dist:mac:local
@@ -126,6 +127,7 @@ jobs:
           JOB_KOREA_DOMAIN: ${{ vars.JOB_KOREA_DOMAIN }}
           ALBAMON_DOMAIN: ${{ vars.ALBAMON_DOMAIN }}
           ALBAMON_BFF_COMPANY: ${{ vars.ALBAMON_BFF_COMPANY }}
+          ALBAMON_BFF_COMPANY_V1: ${{ vars.ALBAMON_BFF_COMPANY_V1 }}
           SENTRY_ENVIRONMENT: production
           CRAWLING_ENCRYPTION_KEY: ${{ secrets.CRAWLING_ENCRYPTION_KEY }}
         run: yarn dist:win:local
