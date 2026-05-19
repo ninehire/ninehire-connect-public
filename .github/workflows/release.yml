@@ -89,80 +89,14 @@ jobs:
           path: artifacts/*
           retention-days: 30
 
-  build-windows:
-    runs-on: windows-latest
-    environment: production
-    steps:
-      - name: Checkout private repo
-        uses: actions/checkout@v4
-        with:
-          repository: ninehire/ninehire-connect
-          ref: master
-          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
-          path: source
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      - name: Enable Corepack
-        working-directory: source
-        run: corepack enable
-
-      - name: Install dependencies
-        working-directory: source
-        run: yarn install --immutable
-
-      - name: Build
-        working-directory: source
-        env:
-          PROD_URL: ${{ vars.PROD_URL }}
-          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
-          GAMEJOB_DOMAIN: ${{ vars.GAMEJOB_DOMAIN }}
-          SARAMIN_DOMAIN: ${{ vars.SARAMIN_DOMAIN }}
-          SARAMIN_OLD_DOMAIN: ${{ vars.SARAMIN_OLD_DOMAIN }}
-          SARAMIN_API_DOMAIN: ${{ vars.SARAMIN_API_DOMAIN }}
-          WANTED_DOMAIN: ${{ vars.WANTED_DOMAIN }}
-          WANTED_INTEGRATION_DOMAIN: ${{ vars.WANTED_INTEGRATION_DOMAIN }}
-          JOB_KOREA_DOMAIN: ${{ vars.JOB_KOREA_DOMAIN }}
-          ALBAMON_DOMAIN: ${{ vars.ALBAMON_DOMAIN }}
-          ALBAMON_BFF_COMPANY: ${{ vars.ALBAMON_BFF_COMPANY }}
-          ALBAMON_BFF_COMPANY_V1: ${{ vars.ALBAMON_BFF_COMPANY_V1 }}
-          SENTRY_ENVIRONMENT: production
-          CRAWLING_ENCRYPTION_KEY: ${{ secrets.CRAWLING_ENCRYPTION_KEY }}
-        run: yarn dist:win:local
-
-      - name: Copy artifacts
-        run: |
-          mkdir artifacts
-          copy source\apps\desktop\release\*.exe artifacts\ 2>nul || echo No EXE files found
-          copy source\apps\desktop\release\latest.yml artifacts\ 2>nul || echo No latest.yml found
-        shell: cmd
-
-      - name: Clean source code
-        run: Remove-Item -Recurse -Force source
-        shell: powershell
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: windows-release
-          path: artifacts/*
-          retention-days: 30
-
   create-draft-release:
-    needs: [build-mac, build-windows]
+    needs: [build-mac]
     runs-on: ubuntu-latest
     steps:
       - name: Download Mac artifacts
         uses: actions/download-artifact@v4
         with:
           name: mac-release
-          path: release-files
-
-      - name: Download Windows artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: windows-release
           path: release-files
 
       - name: Create Draft Release
@@ -179,7 +113,6 @@ jobs:
 
             ## 📦 다운로드
             - **macOS (Apple Silicon)**: `NinehireConnect-*-arm64.dmg`
-            - **Windows (64-bit)**: `NinehireConnect-*-x64.exe`
 
             ## 📝 설치 방법
 
@@ -187,10 +120,6 @@ jobs:
             1. DMG 파일 다운로드
             2. DMG 파일 실행
             3. NinehireConnect 앱을 Applications 폴더로 드래그
-
-            ### Windows
-            1. EXE 파일 다운로드
-            2. 실행하여 설치 마법사 진행
 
             ---
 
