@@ -1,0 +1,257 @@
+name: Test 2-Variant Build
+
+# 2-variant(bundled/lite) 빌드 파이프라인 검증 전용 워크플로.
+# 서명/공증 없이(unsigned) 빌드해 산출물 파일명·채널 yml·variant.txt 마커만 검증한다.
+# production 배포는 release.yml 을 사용한다.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'private repo(ninehire/ninehire-connect) checkout ref'
+        required: true
+        default: 'feat/connect-chrome-bundling'
+
+jobs:
+  test-mac-bundled:
+    runs-on: macos-latest
+    environment: development
+    steps:
+      - name: Checkout private repo
+        uses: actions/checkout@v4
+        with:
+          repository: ninehire/ninehire-connect
+          ref: ${{ inputs.ref }}
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          path: source
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Enable Corepack
+        working-directory: source
+        run: corepack enable
+
+      - name: Install dependencies
+        working-directory: source
+        run: yarn install --immutable
+
+      # 서명/공증 없이 빌드:
+      # - CSC_IDENTITY_AUTO_DISCOVERY=false + -c.mac.identity=null (package.json 의 identity 하드코드 무효화)
+      # - -c.mac.notarize=false (notarize:true 무효화)
+      # electron-builder 는 --config 파일 + -c.* 반복 지정 시 순서대로 deep merge 한다.
+      - name: Build (unsigned, bundled)
+        working-directory: source
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+          PROD_URL: ${{ vars.PROD_URL }}
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          GAMEJOB_DOMAIN: ${{ vars.GAMEJOB_DOMAIN }}
+          SARAMIN_DOMAIN: ${{ vars.SARAMIN_DOMAIN }}
+          SARAMIN_OLD_DOMAIN: ${{ vars.SARAMIN_OLD_DOMAIN }}
+          SARAMIN_API_DOMAIN: ${{ vars.SARAMIN_API_DOMAIN }}
+          WANTED_DOMAIN: ${{ vars.WANTED_DOMAIN }}
+          WANTED_INTEGRATION_DOMAIN: ${{ vars.WANTED_INTEGRATION_DOMAIN }}
+          JOB_KOREA_DOMAIN: ${{ vars.JOB_KOREA_DOMAIN }}
+          ALBAMON_DOMAIN: ${{ vars.ALBAMON_DOMAIN }}
+          ALBAMON_BFF_COMPANY: ${{ vars.ALBAMON_BFF_COMPANY }}
+          ALBAMON_BFF_COMPANY_V1: ${{ vars.ALBAMON_BFF_COMPANY_V1 }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # 퍼블릭 레포 자동 제공
+          SENTRY_ENVIRONMENT: development
+          CRAWLING_ENCRYPTION_KEY: ${{ secrets.CRAWLING_ENCRYPTION_KEY }}
+        run: yarn workspace @ninehire/desktop dist:mac:bundled:local -c.mac.identity=null -c.mac.notarize=false
+
+      - name: Assert bundled artifacts (U1/U2/U4)
+        working-directory: source/apps/desktop/release
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "== release/ 산출물 목록 =="
+          ls -al
+
+          # U1: publish channel 'latest-bundled' → latest-bundled-mac.yml 생성
+          if [ ! -f latest-bundled-mac.yml ]; then
+            echo "::error::[U1] latest-bundled-mac.yml 이 생성되지 않았습니다 (eb.bundled.json 의 publish channel 미반영)"
+            exit 1
+          fi
+
+          # U2: yml 의 url/path 가 -bundled- 파일명 규칙과 일치
+          if grep -E '^(path:| *- url:)' latest-bundled-mac.yml | grep -v -- '-bundled-'; then
+            echo "::error::[U2] latest-bundled-mac.yml 의 url/path 중 -bundled- 가 없는 항목이 있습니다 (artifactName 오버레이 미반영)"
+            exit 1
+          fi
+
+          # U2: sha512 필드 존재
+          if ! grep -q 'sha512:' latest-bundled-mac.yml; then
+            echo "::error::[U2] latest-bundled-mac.yml 에 sha512 필드가 없습니다"
+            exit 1
+          fi
+
+          # U2: yml 이 가리키는 파일이 실제 존재
+          grep -E '^(path:| *- url:)' latest-bundled-mac.yml | awk '{print $NF}' | while read -r f; do
+            if [ ! -f "$f" ]; then
+              echo "::error::[U2] yml 이 가리키는 파일이 release/ 에 없습니다: $f"
+              exit 1
+            fi
+          done
+
+          # U4: zip 내부 variant.txt == 'bundled'
+          ZIP=$(ls NinehireConnect-*-bundled-arm64.zip 2>/dev/null | head -1 || true)
+          if [ -z "$ZIP" ]; then
+            echo "::error::bundled zip 산출물(NinehireConnect-*-bundled-arm64.zip)이 없습니다"
+            exit 1
+          fi
+          VARIANT=$(unzip -p "$ZIP" "*/Contents/Resources/variant.txt" 2>/dev/null | tr -d '[:space:]' || true)
+          if [ "$VARIANT" != "bundled" ]; then
+            echo "::error::[U4] zip 내부 variant.txt 내용이 'bundled' 가 아닙니다: '${VARIANT}'"
+            exit 1
+          fi
+
+          # bundled zip 에 Chrome 동봉 확인
+          if ! unzip -l "$ZIP" | grep -q 'Contents/Resources/chrome/'; then
+            echo "::error::bundled zip 에 Contents/Resources/chrome/ 가 없습니다 (CfT 동봉 실패)"
+            exit 1
+          fi
+
+          echo "✅ bundled variant assert 전체 통과"
+
+      - name: Collect debug artifacts
+        if: always()
+        run: |
+          mkdir -p debug
+          cp source/apps/desktop/release/*.yml debug/ 2>/dev/null || echo "No yml files found"
+          ls -al source/apps/desktop/release > debug/release-file-list.txt 2>/dev/null || echo "no release dir" > debug/release-file-list.txt
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-mac-bundled-debug
+          path: debug/*
+          retention-days: 7
+
+  test-mac-lite:
+    runs-on: macos-latest
+    environment: development
+    steps:
+      - name: Checkout private repo
+        uses: actions/checkout@v4
+        with:
+          repository: ninehire/ninehire-connect
+          ref: ${{ inputs.ref }}
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          path: source
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Enable Corepack
+        working-directory: source
+        run: corepack enable
+
+      - name: Install dependencies
+        working-directory: source
+        run: yarn install --immutable
+
+      # lite 는 dist:mac:lite:local 스크립트가 dotenv-cli 로 SKIP_CHROME_BUNDLE=true 를 주입한다.
+      - name: Build (unsigned, lite)
+        working-directory: source
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+          PROD_URL: ${{ vars.PROD_URL }}
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          GAMEJOB_DOMAIN: ${{ vars.GAMEJOB_DOMAIN }}
+          SARAMIN_DOMAIN: ${{ vars.SARAMIN_DOMAIN }}
+          SARAMIN_OLD_DOMAIN: ${{ vars.SARAMIN_OLD_DOMAIN }}
+          SARAMIN_API_DOMAIN: ${{ vars.SARAMIN_API_DOMAIN }}
+          WANTED_DOMAIN: ${{ vars.WANTED_DOMAIN }}
+          WANTED_INTEGRATION_DOMAIN: ${{ vars.WANTED_INTEGRATION_DOMAIN }}
+          JOB_KOREA_DOMAIN: ${{ vars.JOB_KOREA_DOMAIN }}
+          ALBAMON_DOMAIN: ${{ vars.ALBAMON_DOMAIN }}
+          ALBAMON_BFF_COMPANY: ${{ vars.ALBAMON_BFF_COMPANY }}
+          ALBAMON_BFF_COMPANY_V1: ${{ vars.ALBAMON_BFF_COMPANY_V1 }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # 퍼블릭 레포 자동 제공
+          SENTRY_ENVIRONMENT: development
+          CRAWLING_ENCRYPTION_KEY: ${{ secrets.CRAWLING_ENCRYPTION_KEY }}
+        run: yarn workspace @ninehire/desktop dist:mac:lite:local -c.mac.identity=null -c.mac.notarize=false
+
+      - name: Assert lite artifacts (U1/U2/U4)
+        working-directory: source/apps/desktop/release
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "== release/ 산출물 목록 =="
+          ls -al
+
+          # U1: 기존 채널 latest-mac.yml 생성 (하위 호환)
+          if [ ! -f latest-mac.yml ]; then
+            echo "::error::[U1] latest-mac.yml 이 생성되지 않았습니다"
+            exit 1
+          fi
+
+          # U1: lite 빌드에서 bundled 채널 yml 이 생성되면 안 됨
+          if [ -f latest-bundled-mac.yml ]; then
+            echo "::error::[U1] lite 빌드인데 latest-bundled-mac.yml 이 생성되었습니다 (채널 오염)"
+            exit 1
+          fi
+
+          # 파일명에 -bundled- 가 섞인 산출물이 없어야 함
+          if ls ./*-bundled-* 2>/dev/null; then
+            echo "::error::lite 빌드인데 -bundled- 파일명이 존재합니다"
+            exit 1
+          fi
+
+          # U2: yml 의 url/path 에 -bundled- 가 없어야 함 (기존 파일명 규칙 유지)
+          if grep -E '^(path:| *- url:)' latest-mac.yml | grep -- '-bundled-'; then
+            echo "::error::[U2] latest-mac.yml 의 url/path 에 -bundled- 파일명이 있습니다"
+            exit 1
+          fi
+
+          # U2: sha512 필드 존재
+          if ! grep -q 'sha512:' latest-mac.yml; then
+            echo "::error::[U2] latest-mac.yml 에 sha512 필드가 없습니다"
+            exit 1
+          fi
+
+          # U2: yml 이 가리키는 파일이 실제 존재
+          grep -E '^(path:| *- url:)' latest-mac.yml | awk '{print $NF}' | while read -r f; do
+            if [ ! -f "$f" ]; then
+              echo "::error::[U2] yml 이 가리키는 파일이 release/ 에 없습니다: $f"
+              exit 1
+            fi
+          done
+
+          # U4: zip 내부 variant.txt == 'lite'
+          ZIP=$(ls NinehireConnect-*-arm64.zip 2>/dev/null | grep -v -- '-bundled-' | head -1 || true)
+          if [ -z "$ZIP" ]; then
+            echo "::error::lite zip 산출물(NinehireConnect-*-arm64.zip)이 없습니다"
+            exit 1
+          fi
+          VARIANT=$(unzip -p "$ZIP" "*/Contents/Resources/variant.txt" 2>/dev/null | tr -d '[:space:]' || true)
+          if [ "$VARIANT" != "lite" ]; then
+            echo "::error::[U4] zip 내부 variant.txt 내용이 'lite' 가 아닙니다: '${VARIANT}'"
+            exit 1
+          fi
+
+          # lite zip 에는 Chrome 이 동봉되면 안 됨
+          if unzip -l "$ZIP" | grep -q 'Contents/Resources/chrome/'; then
+            echo "::error::lite zip 에 Contents/Resources/chrome/ 가 포함되어 있습니다 (SKIP_CHROME_BUNDLE 미적용)"
+            exit 1
+          fi
+
+          echo "✅ lite variant assert 전체 통과"
+
+      - name: Collect debug artifacts
+        if: always()
+        run: |
+          mkdir -p debug
+          cp source/apps/desktop/release/*.yml debug/ 2>/dev/null || echo "No yml files found"
+          ls -al source/apps/desktop/release > debug/release-file-list.txt 2>/dev/null || echo "no release dir" > debug/release-file-list.txt
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-mac-lite-debug
+          path: debug/*
+          retention-days: 7
