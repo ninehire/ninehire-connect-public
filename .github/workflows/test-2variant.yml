@@ -125,14 +125,17 @@ jobs:
         run: |
           mkdir -p debug
           cp source/apps/desktop/release/*.yml debug/ 2>/dev/null || echo "No yml files found"
+          cp source/apps/desktop/release/*.dmg debug/ 2>/dev/null || echo "No dmg files found"
+          cp source/apps/desktop/release/*.zip debug/ 2>/dev/null || echo "No zip files found"
           ls -al source/apps/desktop/release > debug/release-file-list.txt 2>/dev/null || echo "no release dir" > debug/release-file-list.txt
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: test-mac-bundled-debug
+          name: mac-bundled-test-build
           path: debug/*
           retention-days: 7
+          compression-level: 0 # dmg/zip 은 이미 압축된 바이너리 — 재압축 낭비 방지
 
   test-mac-lite:
     runs-on: macos-latest
@@ -251,11 +254,14 @@ jobs:
         run: |
           mkdir -p debug
           cp source/apps/desktop/release/*.yml debug/ 2>/dev/null || echo "No yml files found"
+          cp source/apps/desktop/release/*.dmg debug/ 2>/dev/null || echo "No dmg files found"
+          cp source/apps/desktop/release/*.zip debug/ 2>/dev/null || echo "No zip files found"
           ls -al source/apps/desktop/release > debug/release-file-list.txt 2>/dev/null || echo "no release dir" > debug/release-file-list.txt
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: test-mac-lite-debug
+          name: mac-lite-test-build
           path: debug/*
           retention-days: 7
+          compression-level: 0 # dmg/zip 은 이미 압축된 바이너리 — 재압축 낭비 방지
