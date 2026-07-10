@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-mac:
+  build-mac-bundled:
     runs-on: macos-latest
     environment: production
     outputs:
@@ -51,7 +51,7 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$MAC_CERTIFICATE_PASSWORD" build.keychain
           rm certificate.p12
 
-      - name: Build & Notarize
+      - name: Build & Notarize (bundled)
         working-directory: source
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
@@ -71,39 +71,166 @@ jobs:
           ALBAMON_BFF_COMPANY_V1: ${{ vars.ALBAMON_BFF_COMPANY_V1 }}
           SENTRY_ENVIRONMENT: production
           CRAWLING_ENCRYPTION_KEY: ${{ secrets.CRAWLING_ENCRYPTION_KEY }}
-        run: yarn dist:mac:local
+        run: yarn workspace @ninehire/desktop dist:mac:bundled:local
+
+      - name: Verify bundled variant
+        working-directory: source/apps/desktop/release
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -f latest-bundled-mac.yml ]; then
+            echo "::error::latest-bundled-mac.yml 이 생성되지 않았습니다"
+            exit 1
+          fi
+          ZIP=$(ls NinehireConnect-*-bundled-arm64.zip 2>/dev/null | head -1 || true)
+          if [ -z "$ZIP" ]; then
+            echo "::error::bundled zip 산출물이 없습니다"
+            exit 1
+          fi
+          VARIANT=$(unzip -p "$ZIP" "*/Contents/Resources/variant.txt" 2>/dev/null | tr -d '[:space:]' || true)
+          if [ "$VARIANT" != "bundled" ]; then
+            echo "::error::zip 내부 variant.txt 가 'bundled' 가 아닙니다: '${VARIANT}'"
+            exit 1
+          fi
+          echo "✅ bundled variant 검증 통과"
 
       - name: Copy artifacts
         run: |
           mkdir -p artifacts
-          cp source/apps/desktop/release/*.dmg artifacts/ 2>/dev/null || echo "No DMG files found"
-          cp source/apps/desktop/release/*.zip artifacts/ 2>/dev/null || echo "No ZIP files found"
-          cp source/apps/desktop/release/latest-mac.yml artifacts/ 2>/dev/null || echo "No latest-mac.yml found"
+          cp source/apps/desktop/release/NinehireConnect-*-bundled-*.dmg artifacts/
+          cp source/apps/desktop/release/NinehireConnect-*-bundled-*.zip artifacts/
+          cp source/apps/desktop/release/latest-bundled-mac.yml artifacts/
 
       - name: Clean source code
         run: rm -rf source
 
       - uses: actions/upload-artifact@v4
         with:
-          name: mac-release
+          name: mac-release-bundled
+          path: artifacts/*
+          retention-days: 30
+
+  build-mac-lite:
+    runs-on: macos-latest
+    environment: production
+    steps:
+      - name: Checkout private repo
+        uses: actions/checkout@v4
+        with:
+          repository: ninehire/ninehire-connect
+          ref: master
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          path: source
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Enable Corepack
+        working-directory: source
+        run: corepack enable
+
+      - name: Install dependencies
+        working-directory: source
+        run: yarn install --immutable
+
+      - name: Import Certificate
+        env:
+          MAC_CERTIFICATE_BASE64: ${{ secrets.MAC_CERTIFICATE_BASE64 }}
+          MAC_CERTIFICATE_PASSWORD: ${{ secrets.MAC_CERTIFICATE_PASSWORD }}
+        run: |
+          echo "$MAC_CERTIFICATE_BASE64" | base64 --decode > certificate.p12
+          security create-keychain -p "$MAC_CERTIFICATE_PASSWORD" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "$MAC_CERTIFICATE_PASSWORD" build.keychain
+          security import certificate.p12 -k build.keychain -P "$MAC_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$MAC_CERTIFICATE_PASSWORD" build.keychain
+          rm certificate.p12
+
+      # lite 는 dist:mac:lite:local 스크립트가 dotenv-cli 로 SKIP_CHROME_BUNDLE=true 를 주입한다.
+      - name: Build & Notarize (lite)
+        working-directory: source
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          PROD_URL: ${{ vars.PROD_URL }}
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          GAMEJOB_DOMAIN: ${{ vars.GAMEJOB_DOMAIN }}
+          SARAMIN_DOMAIN: ${{ vars.SARAMIN_DOMAIN }}
+          SARAMIN_OLD_DOMAIN: ${{ vars.SARAMIN_OLD_DOMAIN }}
+          SARAMIN_API_DOMAIN: ${{ vars.SARAMIN_API_DOMAIN }}
+          WANTED_DOMAIN: ${{ vars.WANTED_DOMAIN }}
+          WANTED_INTEGRATION_DOMAIN: ${{ vars.WANTED_INTEGRATION_DOMAIN }}
+          JOB_KOREA_DOMAIN: ${{ vars.JOB_KOREA_DOMAIN }}
+          ALBAMON_DOMAIN: ${{ vars.ALBAMON_DOMAIN }}
+          ALBAMON_BFF_COMPANY: ${{ vars.ALBAMON_BFF_COMPANY }}
+          ALBAMON_BFF_COMPANY_V1: ${{ vars.ALBAMON_BFF_COMPANY_V1 }}
+          SENTRY_ENVIRONMENT: production
+          CRAWLING_ENCRYPTION_KEY: ${{ secrets.CRAWLING_ENCRYPTION_KEY }}
+        run: yarn workspace @ninehire/desktop dist:mac:lite:local
+
+      - name: Verify lite variant
+        working-directory: source/apps/desktop/release
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -f latest-mac.yml ]; then
+            echo "::error::latest-mac.yml 이 생성되지 않았습니다"
+            exit 1
+          fi
+          if [ -f latest-bundled-mac.yml ]; then
+            echo "::error::lite 빌드인데 latest-bundled-mac.yml 이 생성되었습니다 (채널 오염)"
+            exit 1
+          fi
+          if ls ./*-bundled-* 2>/dev/null; then
+            echo "::error::lite 빌드인데 -bundled- 파일명이 존재합니다"
+            exit 1
+          fi
+          ZIP=$(ls NinehireConnect-*-arm64.zip 2>/dev/null | grep -v -- '-bundled-' | head -1 || true)
+          if [ -z "$ZIP" ]; then
+            echo "::error::lite zip 산출물이 없습니다"
+            exit 1
+          fi
+          VARIANT=$(unzip -p "$ZIP" "*/Contents/Resources/variant.txt" 2>/dev/null | tr -d '[:space:]' || true)
+          if [ "$VARIANT" != "lite" ]; then
+            echo "::error::zip 내부 variant.txt 가 'lite' 가 아닙니다: '${VARIANT}'"
+            exit 1
+          fi
+          echo "✅ lite variant 검증 통과"
+
+      - name: Copy artifacts
+        run: |
+          mkdir -p artifacts
+          cp source/apps/desktop/release/NinehireConnect-*.dmg artifacts/
+          cp source/apps/desktop/release/NinehireConnect-*.zip artifacts/
+          cp source/apps/desktop/release/latest-mac.yml artifacts/
+
+      - name: Clean source code
+        run: rm -rf source
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac-release-lite
           path: artifacts/*
           retention-days: 30
 
   create-draft-release:
-    needs: [build-mac]
+    needs: [build-mac-bundled, build-mac-lite]
     runs-on: ubuntu-latest
     steps:
-      - name: Download Mac artifacts
+      - name: Download Mac artifacts (bundled + lite)
         uses: actions/download-artifact@v4
         with:
-          name: mac-release
+          pattern: mac-release-*
           path: release-files
+          merge-multiple: true
 
       - name: Create Draft Release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: ${{ needs.build-mac.outputs.version }}
-          name: Release ${{ needs.build-mac.outputs.version }}
+          tag_name: ${{ needs.build-mac-bundled.outputs.version }}
+          name: Release ${{ needs.build-mac-bundled.outputs.version }}
           draft: true
           prerelease: false
           files: release-files/*
@@ -111,24 +238,35 @@ jobs:
             ## 🎉 변경사항
             <!-- 여기에 릴리즈 노트를 작성해주세요 -->
 
-            ## 📦 다운로드
-            - **macOS (Apple Silicon)**: `NinehireConnect-*-arm64.dmg`
+            ## 📦 다운로드 (variant 안내)
+            | variant | 설명 | macOS (Apple Silicon) |
+            |---|---|---|
+            | **bundled** | Chrome 동봉 — 설치 후 별도 다운로드 없이 바로 사용 | `NinehireConnect-*-bundled-arm64.dmg` |
+            | **lite** | 기존과 동일 — 첫 실행 시 Chrome 자동 다운로드 | `NinehireConnect-*-arm64.dmg` |
+
+            업데이트 채널: bundled → `latest-bundled-mac.yml` / lite → `latest-mac.yml` (기존 설치 사용자는 lite 채널 유지)
+
+            ## ✅ Windows 수동 업로드 체크리스트 (publish 전 필수)
+            Windows 는 서명 인증서가 설치된 로컬 PC 에서 빌드 후 이 Draft Release 에 직접 업로드해주세요:
+            - [ ] `yarn workspace @ninehire/desktop dist:win:bundled:local` 실행 → `NinehireConnect-*-bundled-x64.exe` + `latest-bundled.yml` 업로드
+            - [ ] `yarn workspace @ninehire/desktop dist:win:lite:local` 실행 → `NinehireConnect-*-x64.exe` + `latest.yml` 업로드
+            - [ ] 업로드 후 exe 4개 파일(installer 2종 + blockmap 있으면 포함)과 yml 4종이 모두 첨부됐는지 확인
 
             ## 📝 설치 방법
 
             ### macOS
-            1. DMG 파일 다운로드
+            1. 원하는 variant 의 DMG 파일 다운로드
             2. DMG 파일 실행
             3. NinehireConnect 앱을 Applications 폴더로 드래그
 
             ---
 
-            **버전:** ${{ needs.build-mac.outputs.version }}  
-            **빌드 날짜:** ${{ steps.time.outputs.kst }}
+            **버전:** ${{ needs.build-mac-bundled.outputs.version }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Summary
         run: |
-          echo "✅ Draft Release Created: ${{ needs.build-mac.outputs.version }}"
+          echo "✅ Draft Release Created: ${{ needs.build-mac-bundled.outputs.version }}"
           echo "📝 Please review and publish the release manually"
+          echo "⚠️  Windows exe/yml 은 로컬 빌드 후 Draft 에 수동 업로드가 필요합니다"
