@@ -11,11 +11,7 @@ on:
       ref:
         description: 'private repo(ninehire/ninehire-connect) checkout ref'
         required: true
-        default: 'feat/connect-chrome-bundling'
-  # [임시] workflow_dispatch 는 default 브랜치(main)에 파일이 있어야 API 에 등록됨 —
-  # main 머지 전 검증용 push 트리거. 머지 시 이 push 블록은 제거할 것.
-  push:
-    branches: [feat/2variant-release-pipeline]
+        default: 'master'
 
 jobs:
   test-mac-bundled:
@@ -26,7 +22,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: ninehire/ninehire-connect
-          ref: ${{ github.event.inputs.ref || 'feat/connect-chrome-bundling' }}
+          ref: ${{ github.event.inputs.ref || 'master' }}
           token: ${{ secrets.PRIVATE_REPO_TOKEN }}
           path: source
 
@@ -146,7 +142,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: ninehire/ninehire-connect
-          ref: ${{ github.event.inputs.ref || 'feat/connect-chrome-bundling' }}
+          ref: ${{ github.event.inputs.ref || 'master' }}
           token: ${{ secrets.PRIVATE_REPO_TOKEN }}
           path: source
 
