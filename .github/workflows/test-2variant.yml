@@ -114,37 +114,7 @@ jobs:
           yarn workspace @ninehire/connect-desktop dist:mac:bundled:local
           yarn workspace @ninehire/connect-desktop dist:mac:lite:local
 
-      - name: Notarize and staple DMG candidates
-        working-directory: source
-        env:
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          shopt -s nullglob
-          : "${APPLE_APP_SPECIFIC_PASSWORD:?APPLE_APP_SPECIFIC_PASSWORD is required}"
-          : "${APPLE_ID:?APPLE_ID is required}"
-          : "${APPLE_TEAM_ID:?APPLE_TEAM_ID is required}"
-
-          release_directory="apps/connect-desktop/release"
-          dmg_paths=("$release_directory"/NinehireConnect-*-arm64.dmg)
-          if [[ "${#dmg_paths[@]}" -ne 2 ]]; then
-            echo "Expected two DMGs before container notarization." >&2
-            exit 1
-          fi
-
-          for dmg_path in "${dmg_paths[@]}"; do
-            xcrun notarytool submit "$dmg_path" \
-              --apple-id "$APPLE_ID" \
-              --password "$APPLE_APP_SPECIFIC_PASSWORD" \
-              --team-id "$APPLE_TEAM_ID" \
-              --wait
-            xcrun stapler staple "$dmg_path"
-          done
-
-      - name: Verify signatures, notarization, variants, and updater metadata
+      - name: Verify app signatures, Gatekeeper acceptance, variants, and updater metadata
         working-directory: source
         shell: bash
         run: |
@@ -183,23 +153,19 @@ jobs:
           rm -rf -- "$verify_root"
           mkdir -p -- "$verify_root"
 
-          for dmg_path in "${dmg_paths[@]}"; do
-            xcrun stapler validate "$dmg_path"
-            spctl --assess --type open --context context:primary-signature --verbose=2 "$dmg_path"
-          done
-
+          # public/main 운영 방식과 동일하게 신뢰 경계는 DMG 컨테이너가 아니라 내부 .app이다.
+          # Electron Builder가 같은 .app으로 DMG/ZIP을 만들므로 ZIP에서 앱 서명과 Gatekeeper 승인을 검증한다.
           for zip_path in "${zip_paths[@]}"; do
             variant_directory="$verify_root/$(basename "$zip_path" .zip)"
             mkdir -p -- "$variant_directory"
             ditto -x -k "$zip_path" "$variant_directory"
             app_path="$variant_directory/NinehireConnect.app"
             test -d "$app_path"
-            xcrun stapler validate "$app_path"
             codesign --verify --deep --strict --verbose=2 "$app_path"
             spctl --assess --type execute --verbose=2 "$app_path"
           done
 
-      - name: Upload signed and notarized POC artifacts
+      - name: Upload POC artifacts containing signed and notarized apps
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: monorepo-connect-macos-signed-${{ github.run_id }}
