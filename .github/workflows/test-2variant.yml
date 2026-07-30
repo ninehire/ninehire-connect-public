@@ -1,7 +1,7 @@
-# STEP 8 TEMPLATE ONLY.
-# This unsigned build-only job stays disabled until the action SHAs and macOS runner are reviewed.
-# Materialize only as .github/workflows/test-2variant.yml (existing workflow ID 306456034).
-name: Build unsigned macOS candidates from sanitized source
+# 수동 1회 POC 전용이다.
+# exact private source를 서명·공증하고 GitHub Artifact만 남긴다.
+# tag, Release, publish, updater 업로드는 수행하지 않는다.
+name: POC Monorepo - Build signed and notarized macOS candidates
 
 on:
   workflow_dispatch:
@@ -9,19 +9,25 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: poc-monorepo-connect-macos-signing
+  cancel-in-progress: false
+
 env:
-  SANITIZED_SOURCE_REF: 3792adda187d4395f3e27858ae70741a516b1447
+  SANITIZED_SOURCE_REF: 922f8cfaa86125a084eaa5bf1bf42933016f2834
 
 jobs:
-  build-mac-public:
-    runs-on: macos-latest
+  build-mac-signed:
+    name: Build signed bundled and lite macOS candidates
+    runs-on: macos-14
     environment: production
+    timeout-minutes: 120
     steps:
       - name: Checkout exact protected sanitized source
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: ninehire/ninehire-connect
-          ref: 3792adda187d4395f3e27858ae70741a516b1447
+          ref: 922f8cfaa86125a084eaa5bf1bf42933016f2834
           token: ${{ secrets.PRIVATE_REPO_TOKEN }}
           path: source
           persist-credentials: false
@@ -32,12 +38,60 @@ jobs:
         with:
           node-version: 20.11.1
 
-      - name: Build unsigned bundled and lite candidates sequentially
+      - name: Enable Corepack and install immutable dependencies
+        working-directory: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          corepack enable
+          yarn install --immutable
+
+      - name: Import signing certificate into an ephemeral keychain
+        env:
+          MAC_CERTIFICATE_BASE64: ${{ secrets.MAC_CERTIFICATE_BASE64 }}
+          MAC_CERTIFICATE_PASSWORD: ${{ secrets.MAC_CERTIFICATE_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${MAC_CERTIFICATE_BASE64:?MAC_CERTIFICATE_BASE64 is required}"
+          : "${MAC_CERTIFICATE_PASSWORD:?MAC_CERTIFICATE_PASSWORD is required}"
+
+          certificate_path="$RUNNER_TEMP/connect-signing-certificate.p12"
+          keychain_path="$RUNNER_TEMP/connect-signing.keychain-db"
+          original_keychain="$(security default-keychain -d user | tr -d '"')"
+
+          printf '%s' "$MAC_CERTIFICATE_BASE64" | base64 --decode > "$certificate_path"
+          security create-keychain -p "$MAC_CERTIFICATE_PASSWORD" "$keychain_path"
+          security set-keychain-settings -lut 21600 "$keychain_path"
+          security unlock-keychain -p "$MAC_CERTIFICATE_PASSWORD" "$keychain_path"
+          security import "$certificate_path" \
+            -k "$keychain_path" \
+            -P "$MAC_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s \
+            -k "$MAC_CERTIFICATE_PASSWORD" \
+            "$keychain_path"
+          security list-keychains -d user -s "$keychain_path" "$original_keychain"
+          security default-keychain -d user -s "$keychain_path"
+          security find-identity -v -p codesigning "$keychain_path"
+
+          {
+            echo "CONNECT_CERTIFICATE_PATH=$certificate_path"
+            echo "CONNECT_SIGNING_KEYCHAIN=$keychain_path"
+            echo "CONNECT_ORIGINAL_KEYCHAIN=$original_keychain"
+          } >> "$GITHUB_ENV"
+
+      - name: Validate production environment and build signed candidates sequentially
         working-directory: source
         env:
           ALBAMON_BFF_COMPANY: ${{ vars.ALBAMON_BFF_COMPANY }}
           ALBAMON_BFF_COMPANY_V1: ${{ vars.ALBAMON_BFF_COMPANY_V1 }}
           ALBAMON_DOMAIN: ${{ vars.ALBAMON_DOMAIN }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           CRAWLING_ENCRYPTION_KEY: ${{ secrets.CRAWLING_ENCRYPTION_KEY }}
           GAMEJOB_DOMAIN: ${{ vars.GAMEJOB_DOMAIN }}
           JOB_KOREA_DOMAIN: ${{ vars.JOB_KOREA_DOMAIN }}
@@ -49,12 +103,72 @@ jobs:
           SENTRY_ENVIRONMENT: production
           WANTED_DOMAIN: ${{ vars.WANTED_DOMAIN }}
           WANTED_INTEGRATION_DOMAIN: ${{ vars.WANTED_INTEGRATION_DOMAIN }}
-        run: bash ./apps/connect-desktop/scripts/build-mac-public.sh production
+        shell: bash
+        run: |
+          set -euo pipefail
+          node tooling/connect-release/validate-release-env.mjs --mode production
+          rm -rf -- apps/connect-desktop/release
+          yarn workspace @ninehire/connect-desktop dist:mac:bundled:local
+          yarn workspace @ninehire/connect-desktop dist:mac:lite:local
 
-      - name: Upload unsigned build evidence
+      - name: Verify signatures, notarization, variants, and updater metadata
+        working-directory: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+
+          release_directory="apps/connect-desktop/release"
+          dmg_paths=("$release_directory"/NinehireConnect-*-arm64.dmg)
+          zip_paths=("$release_directory"/NinehireConnect-*-arm64.zip)
+          bundled_zip=("$release_directory"/NinehireConnect-*-bundled-arm64.zip)
+          lite_zip=("$release_directory"/NinehireConnect-*-arm64.zip)
+
+          if [[ "${#dmg_paths[@]}" -ne 2 || "${#zip_paths[@]}" -ne 2 ]]; then
+            echo "Expected two signed DMGs and two signed ZIPs." >&2
+            exit 1
+          fi
+          if [[ "${#bundled_zip[@]}" -ne 1 ]]; then
+            echo "Expected exactly one bundled ZIP." >&2
+            exit 1
+          fi
+
+          lite_zip_path=""
+          for zip_path in "${zip_paths[@]}"; do
+            if [[ "$(basename "$zip_path")" != *-bundled-* ]]; then
+              lite_zip_path="$zip_path"
+            fi
+          done
+          : "${lite_zip_path:?A lite ZIP is required}"
+
+          grep -Fq "$(basename "${bundled_zip[0]}")" \
+            "$release_directory/latest-bundled-mac.yml"
+          grep -Fq "$(basename "$lite_zip_path")" \
+            "$release_directory/latest-mac.yml"
+
+          verify_root="$RUNNER_TEMP/connect-signature-verification"
+          rm -rf -- "$verify_root"
+          mkdir -p -- "$verify_root"
+
+          for dmg_path in "${dmg_paths[@]}"; do
+            xcrun stapler validate "$dmg_path"
+            spctl --assess --type open --context context:primary-signature --verbose=2 "$dmg_path"
+          done
+
+          for zip_path in "${zip_paths[@]}"; do
+            variant_directory="$verify_root/$(basename "$zip_path" .zip)"
+            mkdir -p -- "$variant_directory"
+            ditto -x -k "$zip_path" "$variant_directory"
+            app_path="$variant_directory/NinehireConnect.app"
+            test -d "$app_path"
+            codesign --verify --deep --strict --verbose=2 "$app_path"
+            spctl --assess --type execute --verbose=2 "$app_path"
+          done
+
+      - name: Upload signed and notarized POC artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: macos-public-build-only
+          name: monorepo-connect-macos-signed-${{ github.run_id }}
           path: |
             source/apps/connect-desktop/release/NinehireConnect-*-arm64.dmg
             source/apps/connect-desktop/release/NinehireConnect-*-arm64.zip
@@ -62,3 +176,16 @@ jobs:
             source/apps/connect-desktop/release/latest-mac.yml
           if-no-files-found: error
           retention-days: 7
+          compression-level: 0
+
+      - name: Remove certificate and ephemeral keychain
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          if [[ -n "${CONNECT_ORIGINAL_KEYCHAIN:-}" ]]; then
+            security default-keychain -d user -s "$CONNECT_ORIGINAL_KEYCHAIN"
+          fi
+          keychain_path="${CONNECT_SIGNING_KEYCHAIN:-$RUNNER_TEMP/connect-signing.keychain-db}"
+          security delete-keychain "$keychain_path" 2>/dev/null || true
+          rm -f "${CONNECT_CERTIFICATE_PATH:-$RUNNER_TEMP/connect-signing-certificate.p12}"
