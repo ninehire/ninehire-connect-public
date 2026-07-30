@@ -58,7 +58,10 @@ jobs:
 
           certificate_path="$RUNNER_TEMP/connect-signing-certificate.p12"
           keychain_path="$RUNNER_TEMP/connect-signing.keychain-db"
-          original_keychain="$(security default-keychain -d user | tr -d '"')"
+          original_keychain="$(
+            security default-keychain -d user |
+              sed -E 's/^[[:space:]]*"//; s/"[[:space:]]*$//'
+          )"
 
           printf '%s' "$MAC_CERTIFICATE_BASE64" | base64 --decode > "$certificate_path"
           security create-keychain -p "$MAC_CERTIFICATE_PASSWORD" "$keychain_path"
@@ -111,6 +114,36 @@ jobs:
           yarn workspace @ninehire/connect-desktop dist:mac:bundled:local
           yarn workspace @ninehire/connect-desktop dist:mac:lite:local
 
+      - name: Notarize and staple DMG candidates
+        working-directory: source
+        env:
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          : "${APPLE_APP_SPECIFIC_PASSWORD:?APPLE_APP_SPECIFIC_PASSWORD is required}"
+          : "${APPLE_ID:?APPLE_ID is required}"
+          : "${APPLE_TEAM_ID:?APPLE_TEAM_ID is required}"
+
+          release_directory="apps/connect-desktop/release"
+          dmg_paths=("$release_directory"/NinehireConnect-*-arm64.dmg)
+          if [[ "${#dmg_paths[@]}" -ne 2 ]]; then
+            echo "Expected two DMGs before container notarization." >&2
+            exit 1
+          fi
+
+          for dmg_path in "${dmg_paths[@]}"; do
+            xcrun notarytool submit "$dmg_path" \
+              --apple-id "$APPLE_ID" \
+              --password "$APPLE_APP_SPECIFIC_PASSWORD" \
+              --team-id "$APPLE_TEAM_ID" \
+              --wait
+            xcrun stapler staple "$dmg_path"
+          done
+
       - name: Verify signatures, notarization, variants, and updater metadata
         working-directory: source
         shell: bash
@@ -161,6 +194,7 @@ jobs:
             ditto -x -k "$zip_path" "$variant_directory"
             app_path="$variant_directory/NinehireConnect.app"
             test -d "$app_path"
+            xcrun stapler validate "$app_path"
             codesign --verify --deep --strict --verbose=2 "$app_path"
             spctl --assess --type execute --verbose=2 "$app_path"
           done
