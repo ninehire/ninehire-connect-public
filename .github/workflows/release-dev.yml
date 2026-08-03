@@ -3,137 +3,187 @@ name: Build Dev
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: connect-build-dev
+  cancel-in-progress: false
+
+env:
+  SANITIZED_SOURCE_REF: dev
+
 jobs:
   build-mac:
-    runs-on: macos-latest
+    name: Build signed and notarized macOS dev candidate
+    runs-on: macos-14
     environment: development
+    timeout-minutes: 120
     steps:
-      - name: Checkout private repo
-        uses: actions/checkout@v4
+      - name: Checkout private sanitized dev source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: ninehire/ninehire-connect
-          ref: dev # 프라이빗 레포의 dev 브랜치
+          ref: ${{ env.SANITIZED_SOURCE_REF }}
           token: ${{ secrets.PRIVATE_REPO_TOKEN }}
           path: source
+          persist-credentials: false
+          fetch-depth: 1
 
-      - uses: actions/setup-node@v4
+      - name: Set up Node 20.11.1
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 22
+          node-version: 20.11.1
 
-      - name: Enable Corepack
+      - name: Enable Corepack and install immutable dependencies
         working-directory: source
-        run: corepack enable
+        shell: bash
+        run: |
+          set -euo pipefail
+          corepack enable
+          yarn install --immutable
 
-      - name: Install dependencies
-        working-directory: source
-        run: yarn install --immutable
-
-      - name: Import Certificate
+      - name: Import signing certificate into an ephemeral keychain
         env:
           MAC_CERTIFICATE_BASE64: ${{ secrets.MAC_CERTIFICATE_BASE64 }}
           MAC_CERTIFICATE_PASSWORD: ${{ secrets.MAC_CERTIFICATE_PASSWORD }}
+        shell: bash
         run: |
-          echo "$MAC_CERTIFICATE_BASE64" | base64 --decode > certificate.p12
-          security create-keychain -p "$MAC_CERTIFICATE_PASSWORD" build.keychain
-          security default-keychain -s build.keychain
-          security unlock-keychain -p "$MAC_CERTIFICATE_PASSWORD" build.keychain
-          security import certificate.p12 -k build.keychain -P "$MAC_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$MAC_CERTIFICATE_PASSWORD" build.keychain
-          rm certificate.p12
+          set -euo pipefail
+          : "${MAC_CERTIFICATE_BASE64:?MAC_CERTIFICATE_BASE64 is required}"
+          : "${MAC_CERTIFICATE_PASSWORD:?MAC_CERTIFICATE_PASSWORD is required}"
 
-      - name: Build & Notarize
+          certificate_path="$RUNNER_TEMP/connect-signing-certificate.p12"
+          keychain_path="$RUNNER_TEMP/connect-signing.keychain-db"
+          original_keychain="$(
+            security default-keychain -d user |
+              sed -E 's/^[[:space:]]*"//; s/"[[:space:]]*$//'
+          )"
+
+          printf '%s' "$MAC_CERTIFICATE_BASE64" | base64 --decode > "$certificate_path"
+          security create-keychain -p "$MAC_CERTIFICATE_PASSWORD" "$keychain_path"
+          security set-keychain-settings -lut 21600 "$keychain_path"
+          security unlock-keychain -p "$MAC_CERTIFICATE_PASSWORD" "$keychain_path"
+          security import "$certificate_path" \
+            -k "$keychain_path" \
+            -P "$MAC_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s \
+            -k "$MAC_CERTIFICATE_PASSWORD" \
+            "$keychain_path"
+          security list-keychains -d user -s "$keychain_path" "$original_keychain"
+          security default-keychain -d user -s "$keychain_path"
+
+          {
+            echo "CONNECT_CERTIFICATE_PATH=$certificate_path"
+            echo "CONNECT_SIGNING_KEYCHAIN=$keychain_path"
+            echo "CONNECT_ORIGINAL_KEYCHAIN=$original_keychain"
+          } >> "$GITHUB_ENV"
+
+      - name: Build and notarize dev candidate
         working-directory: source
         env:
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          PROD_URL: ${{ vars.PROD_URL }}
-          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
-          GAMEJOB_DOMAIN: ${{ vars.GAMEJOB_DOMAIN }}
-          SARAMIN_DOMAIN: ${{ vars.SARAMIN_DOMAIN }}
-          SARAMIN_OLD_DOMAIN: ${{ vars.SARAMIN_OLD_DOMAIN }}
-          SARAMIN_API_DOMAIN: ${{ vars.SARAMIN_API_DOMAIN }}
-          WANTED_DOMAIN: ${{ vars.WANTED_DOMAIN }}
-          WANTED_INTEGRATION_DOMAIN: ${{ vars.WANTED_INTEGRATION_DOMAIN }}
-          JOB_KOREA_DOMAIN: ${{ vars.JOB_KOREA_DOMAIN }}
-          ALBAMON_DOMAIN: ${{ vars.ALBAMON_DOMAIN }}
           ALBAMON_BFF_COMPANY: ${{ vars.ALBAMON_BFF_COMPANY }}
           ALBAMON_BFF_COMPANY_V1: ${{ vars.ALBAMON_BFF_COMPANY_V1 }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # 퍼블릭 레포 자동 제공
-          SENTRY_ENVIRONMENT: development
+          ALBAMON_DOMAIN: ${{ vars.ALBAMON_DOMAIN }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           CRAWLING_ENCRYPTION_KEY: ${{ secrets.CRAWLING_ENCRYPTION_KEY }}
-        run: yarn dist:mac:dev
-
-      - name: Copy artifacts
+          GAMEJOB_DOMAIN: ${{ vars.GAMEJOB_DOMAIN }}
+          JOB_KOREA_DOMAIN: ${{ vars.JOB_KOREA_DOMAIN }}
+          NEXT_DEV_URL: ${{ vars.PROD_URL }}
+          PROD_URL: ${{ vars.PROD_URL }}
+          SARAMIN_API_DOMAIN: ${{ vars.SARAMIN_API_DOMAIN }}
+          SARAMIN_DOMAIN: ${{ vars.SARAMIN_DOMAIN }}
+          SARAMIN_OLD_DOMAIN: ${{ vars.SARAMIN_OLD_DOMAIN }}
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          SENTRY_ENVIRONMENT: development
+          WANTED_DOMAIN: ${{ vars.WANTED_DOMAIN }}
+          WANTED_INTEGRATION_DOMAIN: ${{ vars.WANTED_INTEGRATION_DOMAIN }}
+        shell: bash
         run: |
-          mkdir -p artifacts
-          cp source/apps/desktop/release/*.dmg artifacts/ 2>/dev/null || echo "No DMG files found"
+          set -euo pipefail
+          rm -rf -- apps/connect-desktop/release
+          yarn workspace @ninehire/connect-desktop dist:mac:dev
 
-      - name: Clean source code
-        run: rm -rf source
-
-      - uses: actions/upload-artifact@v4
+      - name: Upload macOS dev candidate
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: mac-dmg-dev
-          path: artifacts/*.dmg
+          name: mac-dev-candidate-${{ github.run_id }}
+          path: |
+            source/apps/connect-desktop/release/NinehireConnect-*-arm64.dmg
+            source/apps/connect-desktop/release/NinehireConnect-*-arm64.zip
+            source/apps/connect-desktop/release/latest-mac.yml
+          if-no-files-found: error
           retention-days: 7
+          compression-level: 0
+
+      - name: Remove certificate and ephemeral keychain
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          if [[ -n "${CONNECT_ORIGINAL_KEYCHAIN:-}" ]]; then
+            security default-keychain -d user -s "$CONNECT_ORIGINAL_KEYCHAIN"
+          fi
+          keychain_path="${CONNECT_SIGNING_KEYCHAIN:-$RUNNER_TEMP/connect-signing.keychain-db}"
+          security delete-keychain "$keychain_path" 2>/dev/null || true
+          rm -f "${CONNECT_CERTIFICATE_PATH:-$RUNNER_TEMP/connect-signing-certificate.p12}"
 
   build-windows:
+    name: Build unsigned bundled and lite Windows dev candidates
+    needs: build-mac
     runs-on: windows-latest
     environment: development
+    timeout-minutes: 120
     steps:
-      - name: Checkout private repo
-        uses: actions/checkout@v4
+      - name: Checkout private sanitized dev source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: ninehire/ninehire-connect
-          ref: dev
+          ref: ${{ env.SANITIZED_SOURCE_REF }}
           token: ${{ secrets.PRIVATE_REPO_TOKEN }}
           path: source
+          persist-credentials: false
+          fetch-depth: 1
 
-      - uses: actions/setup-node@v4
+      - name: Set up Node 20.11.1
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 22
+          node-version: 20.11.1
 
-      - name: Enable Corepack
-        working-directory: source
-        run: corepack enable
-
-      - name: Install dependencies
-        working-directory: source
-        run: yarn install --immutable
-
-      - name: Build
+      - name: Build unsigned Windows dev candidates sequentially
         working-directory: source
         env:
-          PROD_URL: ${{ vars.PROD_URL }}
-          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
-          GAMEJOB_DOMAIN: ${{ vars.GAMEJOB_DOMAIN }}
-          SARAMIN_DOMAIN: ${{ vars.SARAMIN_DOMAIN }}
-          SARAMIN_OLD_DOMAIN: ${{ vars.SARAMIN_OLD_DOMAIN }}
-          SARAMIN_API_DOMAIN: ${{ vars.SARAMIN_API_DOMAIN }}
-          WANTED_DOMAIN: ${{ vars.WANTED_DOMAIN }}
-          WANTED_INTEGRATION_DOMAIN: ${{ vars.WANTED_INTEGRATION_DOMAIN }}
-          JOB_KOREA_DOMAIN: ${{ vars.JOB_KOREA_DOMAIN }}
-          ALBAMON_DOMAIN: ${{ vars.ALBAMON_DOMAIN }}
           ALBAMON_BFF_COMPANY: ${{ vars.ALBAMON_BFF_COMPANY }}
           ALBAMON_BFF_COMPANY_V1: ${{ vars.ALBAMON_BFF_COMPANY_V1 }}
-          SENTRY_ENVIRONMENT: development
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # 퍼블릭 레포 자동 제공
+          ALBAMON_DOMAIN: ${{ vars.ALBAMON_DOMAIN }}
           CRAWLING_ENCRYPTION_KEY: ${{ secrets.CRAWLING_ENCRYPTION_KEY }}
-        run: yarn dist:win:dev
+          GAMEJOB_DOMAIN: ${{ vars.GAMEJOB_DOMAIN }}
+          JOB_KOREA_DOMAIN: ${{ vars.JOB_KOREA_DOMAIN }}
+          NEXT_DEV_URL: ${{ vars.PROD_URL }}
+          SARAMIN_API_DOMAIN: ${{ vars.SARAMIN_API_DOMAIN }}
+          SARAMIN_DOMAIN: ${{ vars.SARAMIN_DOMAIN }}
+          SARAMIN_OLD_DOMAIN: ${{ vars.SARAMIN_OLD_DOMAIN }}
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          SENTRY_ENVIRONMENT: development
+          WANTED_DOMAIN: ${{ vars.WANTED_DOMAIN }}
+          WANTED_INTEGRATION_DOMAIN: ${{ vars.WANTED_INTEGRATION_DOMAIN }}
+        shell: pwsh
+        run: ./apps/connect-desktop/scripts/build-win-public.ps1 -Environment development
 
-      - name: Copy artifacts
-        run: |
-          mkdir artifacts
-          copy source\apps\desktop\release\*.exe artifacts\ 2>nul || echo No EXE files found
-        shell: cmd
-
-      - name: Clean source code
-        run: Remove-Item -Recurse -Force source
-        shell: powershell
-
-      - uses: actions/upload-artifact@v4
+      - name: Upload unsigned Windows dev candidates
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: windows-exe-dev
-          path: artifacts/*.exe
+          name: windows-dev-build-only-${{ github.run_id }}
+          path: |
+            source/apps/connect-desktop/release/NinehireConnect-*-x64.exe
+            source/apps/connect-desktop/release/NinehireConnect-*-x64.exe.blockmap
+            source/apps/connect-desktop/release/latest-bundled.yml
+            source/apps/connect-desktop/release/latest.yml
+          if-no-files-found: error
           retention-days: 7
+          compression-level: 0
