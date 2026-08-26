@@ -93,6 +93,7 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           CRAWLING_ENCRYPTION_KEY: ${{ secrets.CRAWLING_ENCRYPTION_KEY }}
           GAMEJOB_DOMAIN: ${{ vars.GAMEJOB_DOMAIN }}
+          JOBKOREA_BIZCENTER_DISPLAY_V2: ${{ vars.JOBKOREA_BIZCENTER_DISPLAY_V2 }}
           JOB_KOREA_DOMAIN: ${{ vars.JOB_KOREA_DOMAIN }}
           NEXT_DEV_URL: ${{ vars.DEV_URL }}
           PROD_URL: ${{ vars.DEV_URL }}
@@ -163,6 +164,7 @@ jobs:
           ALBAMON_DOMAIN: ${{ vars.ALBAMON_DOMAIN }}
           CRAWLING_ENCRYPTION_KEY: ${{ secrets.CRAWLING_ENCRYPTION_KEY }}
           GAMEJOB_DOMAIN: ${{ vars.GAMEJOB_DOMAIN }}
+          JOBKOREA_BIZCENTER_DISPLAY_V2: ${{ vars.JOBKOREA_BIZCENTER_DISPLAY_V2 }}
           JOB_KOREA_DOMAIN: ${{ vars.JOB_KOREA_DOMAIN }}
           NEXT_DEV_URL: ${{ vars.DEV_URL }}
           SARAMIN_API_DOMAIN: ${{ vars.SARAMIN_API_DOMAIN }}
