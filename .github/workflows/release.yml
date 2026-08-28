@@ -18,17 +18,17 @@ jobs:
           token: ${{ secrets.PRIVATE_REPO_TOKEN }}
           path: source
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20.11.1
+
       - name: Get version from package.json
         id: get_version
         working-directory: source
         run: |
-          VERSION=$(node -p "require('./apps/desktop/package.json').version")
+          VERSION=$(node -p "require('./apps/connect-desktop/package.json').version")
           echo "version=v$VERSION" >> $GITHUB_OUTPUT
           echo "📦 Version: v$VERSION"
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
 
       - name: Enable Corepack
         working-directory: source
@@ -72,10 +72,12 @@ jobs:
           ALBAMON_BFF_COMPANY_V1: ${{ vars.ALBAMON_BFF_COMPANY_V1 }}
           SENTRY_ENVIRONMENT: production
           CRAWLING_ENCRYPTION_KEY: ${{ secrets.CRAWLING_ENCRYPTION_KEY }}
-        run: yarn workspace @ninehire/desktop dist:mac:bundled:local
+        run: |
+          node tooling/connect-release/validate-release-env.mjs --mode production
+          yarn workspace @ninehire/connect-desktop dist:mac:bundled:local
 
       - name: Verify bundled variant
-        working-directory: source/apps/desktop/release
+        working-directory: source/apps/connect-desktop/release
         shell: bash
         run: |
           set -euo pipefail
@@ -98,9 +100,9 @@ jobs:
       - name: Copy artifacts
         run: |
           mkdir -p artifacts
-          cp source/apps/desktop/release/NinehireConnect-*-bundled-*.dmg artifacts/
-          cp source/apps/desktop/release/NinehireConnect-*-bundled-*.zip artifacts/
-          cp source/apps/desktop/release/latest-bundled-mac.yml artifacts/
+          cp source/apps/connect-desktop/release/NinehireConnect-*-bundled-*.dmg artifacts/
+          cp source/apps/connect-desktop/release/NinehireConnect-*-bundled-*.zip artifacts/
+          cp source/apps/connect-desktop/release/latest-bundled-mac.yml artifacts/
 
       - name: Clean source code
         run: rm -rf source
@@ -125,7 +127,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 20.11.1
 
       - name: Enable Corepack
         working-directory: source
@@ -170,10 +172,12 @@ jobs:
           ALBAMON_BFF_COMPANY_V1: ${{ vars.ALBAMON_BFF_COMPANY_V1 }}
           SENTRY_ENVIRONMENT: production
           CRAWLING_ENCRYPTION_KEY: ${{ secrets.CRAWLING_ENCRYPTION_KEY }}
-        run: yarn workspace @ninehire/desktop dist:mac:lite:local
+        run: |
+          node tooling/connect-release/validate-release-env.mjs --mode production
+          yarn workspace @ninehire/connect-desktop dist:mac:lite:local
 
       - name: Verify lite variant
-        working-directory: source/apps/desktop/release
+        working-directory: source/apps/connect-desktop/release
         shell: bash
         run: |
           set -euo pipefail
@@ -204,9 +208,9 @@ jobs:
       - name: Copy artifacts
         run: |
           mkdir -p artifacts
-          cp source/apps/desktop/release/NinehireConnect-*.dmg artifacts/
-          cp source/apps/desktop/release/NinehireConnect-*.zip artifacts/
-          cp source/apps/desktop/release/latest-mac.yml artifacts/
+          cp source/apps/connect-desktop/release/NinehireConnect-*.dmg artifacts/
+          cp source/apps/connect-desktop/release/NinehireConnect-*.zip artifacts/
+          cp source/apps/connect-desktop/release/latest-mac.yml artifacts/
 
       - name: Clean source code
         run: rm -rf source
@@ -250,8 +254,8 @@ jobs:
 
             ## ✅ Windows 수동 업로드 체크리스트 (publish 전 필수)
             Windows 는 서명 인증서가 설치된 로컬 PC 에서 빌드 후 이 Draft Release 에 직접 업로드해주세요:
-            - [ ] `yarn workspace @ninehire/desktop dist:win:bundled:local` 실행 → `NinehireConnect-*-bundled-x64.exe` + `latest-bundled.yml` 업로드
-            - [ ] `yarn workspace @ninehire/desktop dist:win:lite:local` 실행 → `NinehireConnect-*-x64.exe` + `latest.yml` 업로드
+            - [ ] `yarn workspace @ninehire/connect-desktop dist:win:bundled:local` 실행 → `apps/connect-desktop/release/NinehireConnect-*-bundled-x64.exe` + `apps/connect-desktop/release/latest-bundled.yml` 업로드
+            - [ ] `yarn workspace @ninehire/connect-desktop dist:win:lite:local` 실행 → `apps/connect-desktop/release/NinehireConnect-*-x64.exe` + `apps/connect-desktop/release/latest.yml` 업로드
             - [ ] 업로드 후 exe 4개 파일(installer 2종 + blockmap 있으면 포함)과 yml 4종이 모두 첨부됐는지 확인
 
             ## 📝 설치 방법
